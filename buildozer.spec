@@ -1,5 +1,5 @@
 [app]
-title = 폰 온도 알림
+title = 스마트폰 과열방지앱
 package.name = heatalarm
 package.domain = com.dudasky11
 source.dir = .

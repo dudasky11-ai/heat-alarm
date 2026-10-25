@@ -1,4 +1,4 @@
-# 폰 온도 알림 앱 화면
+# 스마트폰 과열방지앱 화면
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
@@ -17,7 +17,7 @@ LabelBase.register(name="Roboto", fn_regular="NanumGothic-Regular.ttf")
 class HeatAlarmApp(App):
     # 1. 화면 만들기: 온도, 단계, 설명을 위에서 아래로 쌓음
     def build(self):
-        self.title = "폰 온도 알림"
+        self.title = "스마트폰 과열방지앱"
         self.temps = []  # 최근 1분 동안의 온도 기록
 
         box = BoxLayout(orientation="vertical", padding=40)
