@@ -1,4 +1,6 @@
 # 폰 온도 알림 앱: 배터리 온도를 보여주고, 백그라운드 감시를 켜고 끔
+import time
+
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
@@ -9,7 +11,7 @@ from kivy.uix.label import Label
 from kivy.uix.slider import Slider
 
 from battery import get_battery, is_android
-from heat import COLORS, judge
+from heat import COLORS, add_reading, guess_cause, judge, rise_per_minute
 
 # 1. 한글 글꼴 등록 (Kivy 기본 글꼴에는 한글이 없음)
 LabelBase.register(name="Roboto", fn_regular="NanumGothic-Regular.ttf")
@@ -28,12 +30,15 @@ class HeatAlarmApp(App):
         self.info_label = Label(text="", font_size="18sp")
         self.advice_label = Label(text="", font_size="18sp", halign="center")
         self.advice_label.bind(width=self.wrap_text)  # 긴 문장을 화면 너비에서 줄바꿈
+        self.cause_label = Label(text="", font_size="16sp", halign="center")
+        self.cause_label.bind(width=self.wrap_text)
+        self.readings = []  # 최근 3분 동안의 (시각, 온도) 기록
 
         self.watch_button = Button(text="백그라운드 감시 켜기", font_size="20sp", size_hint_y=0.25)
         self.watch_button.bind(on_press=self.toggle_watch)
         self.watching = False
 
-        for w in (self.temp_label, self.level_label, self.info_label, self.advice_label):
+        for w in (self.temp_label, self.level_label, self.info_label, self.advice_label, self.cause_label):
             root.add_widget(w)
 
         # 컴퓨터에서 실행할 때는 배터리 온도를 못 읽으니 슬라이더로 온도를 흉내 냄
@@ -81,6 +86,13 @@ class HeatAlarmApp(App):
         self.info_label.text = f"배터리 {battery['level']}% · {charge_text}"
         self.advice_label.text = advice
         self.bg_color.rgba = COLORS[level]
+
+        # 온도 기록을 쌓아서 상승 속도를 구하고, 발열 원인을 추정
+        add_reading(self.readings, time.time(), battery["temp"])
+        rise = rise_per_minute(self.readings)
+        cause, solution = guess_cause(battery["temp"], battery["charging"], rise)
+        rise_text = "계산 중" if rise is None else f"{rise:+.1f}°C/분"
+        self.cause_label.text = f"온도 변화: {rise_text}\n추정 원인: {cause}\n해결책: {solution}"
 
     # 5. 버튼: 백그라운드 감시(service.py) 켜기/끄기
     def toggle_watch(self, button):

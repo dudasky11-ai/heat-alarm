@@ -35,7 +35,53 @@ def should_alert(old_level, new_level):
     return new_level != old_level
 
 
-# 3. 단계별 화면 색 (빨강, 초록, 파랑, 투명도) — Kivy 색 형식
+# 3-1. 측정값을 기록에 추가하고, 3분(180초)보다 오래된 기록은 지움
+KEEP_SECONDS = 180
+
+
+def add_reading(readings, now, temp):
+    readings.append((now, temp))
+    while now - readings[0][0] > KEEP_SECONDS:
+        readings.pop(0)
+
+
+# 3-2. 온도가 1분에 몇 °C씩 오르는지 계산
+#    readings: [(측정 시각(초), 온도), ...] 오래된 것부터. 1분 이상 쌓여야 계산함
+def rise_per_minute(readings):
+    if len(readings) < 2:
+        return None
+    first_time, first_temp = readings[0]
+    last_time, last_temp = readings[-1]
+    minutes = (last_time - first_time) / 60
+    if minutes < 1:
+        return None
+    return (last_temp - first_temp) / minutes
+
+
+# 4. 충전 여부와 온도 상승 속도로 발열 원인을 추정하고 해결책을 돌려줌
+FAST_RISE = 1.0  # 1분에 1°C 이상 오르면 "빠르게 오름"
+SLOW_RISE = 0.3  # 1분에 0.3°C 미만이면 "거의 그대로"
+
+
+def guess_cause(temp, charging, rise):
+    if temp < WARM:
+        return "없음", "지금은 괜찮아요."
+
+    if rise is None:
+        return "분석 중", "1분 정도 지켜본 뒤 원인을 알려드릴게요."
+
+    if charging and rise >= FAST_RISE:
+        return "충전하면서 사용", "충전 중에는 게임·영상을 멈추거나 충전기를 분리하세요."
+    if charging:
+        return "충전 발열", "고속충전을 끄고 케이스를 벗긴 채 충전하세요."
+    if rise >= FAST_RISE:
+        return "무거운 작업 (게임·촬영·영상 통화)", "앱을 잠시 끄고 화면 밝기와 그래픽 설정을 낮추세요."
+    if rise < SLOW_RISE:
+        return "주변 환경 또는 약한 신호", "햇빛·이불 위를 피하고, 신호가 약한 곳이면 Wi-Fi를 쓰세요."
+    return "여러 원인이 겹침", "쓰지 않는 앱을 끄고 케이스를 벗겨 보세요."
+
+
+# 5. 단계별 화면 색 (빨강, 초록, 파랑, 투명도) — Kivy 색 형식
 COLORS = {
     "정상": (0.20, 0.65, 0.35, 1),
     "따뜻함": (0.95, 0.70, 0.10, 1),
