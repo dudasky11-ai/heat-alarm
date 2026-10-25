@@ -28,12 +28,17 @@ class HeatAlarmApp(App):
         box.add_widget(self.level_label)
         box.add_widget(self.info_label)
 
-        # 컴퓨터에서는 배터리 온도를 못 읽으니 슬라이더로 온도를 흉내 냄
-        if not is_android():
+        # 폰은 10초마다, 컴퓨터(시연용)는 1초마다 새로 고침
+        if is_android():
+            self.interval = 10
+        else:
+            self.interval = 1
+            # 컴퓨터에서는 배터리 온도를 못 읽으니 슬라이더로 온도를 흉내 냄
             self.slider = Slider(min=20, max=55, value=30)
             box.add_widget(self.slider)
 
-        Clock.schedule_interval(self.refresh, 10)  # 10초마다 refresh 실행
+        self.count = 60 // self.interval + 1  # 1분 동안 쌓이는 기록 개수 (폰 7개, 컴퓨터 61개)
+        Clock.schedule_interval(self.refresh, self.interval)
         return box
 
     # 2. 앱이 켜지면: 바로 한 번 표시하고, 폰이면 백그라운드 감시 시작
@@ -51,7 +56,7 @@ class HeatAlarmApp(App):
         temp = battery["temp"]
         charging = battery["charging"]
         level, advice = judge(temp, charging)
-        rise = one_minute_rise(self.temps, temp, 7)  # 10초마다 7개 = 1분
+        rise = one_minute_rise(self.temps, temp, self.count)
         cause, solution = guess_cause(temp, charging, rise)
 
         self.temp_label.text = f"{temp:.1f}°C"
