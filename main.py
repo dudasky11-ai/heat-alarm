@@ -1,117 +1,63 @@
-# 폰 온도 알림 앱: 배터리 온도를 보여주고, 백그라운드 감시를 켜고 끔
-import time
-
+# 폰 온도 알림 앱 화면
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
-from kivy.graphics import Color, Rectangle
+from kivy.core.window import Window
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.slider import Slider
 
-from battery import get_battery, is_android
-from heat import COLORS, add_reading, guess_cause, judge, rise_per_minute
+from heat import COLORS, guess_cause, judge, one_minute_rise
+from phone import get_battery, is_android, start_watch
 
-# 1. 한글 글꼴 등록 (Kivy 기본 글꼴에는 한글이 없음)
+# 한글 글꼴 등록 (Kivy 기본 글꼴에는 한글이 없음)
 LabelBase.register(name="Roboto", fn_regular="NanumGothic-Regular.ttf")
-
-SERVICE_CLASS = "com.dudasky11.heatalarm.ServiceHeatwatch"  # buildozer가 만들어 주는 서비스 이름
 
 
 class HeatAlarmApp(App):
-    # 2. 화면 만들기: 위에서 아래로 온도, 단계, 행동 요령, 버튼
+    # 1. 화면 만들기: 온도, 단계, 설명을 위에서 아래로 쌓음
     def build(self):
         self.title = "폰 온도 알림"
-        root = BoxLayout(orientation="vertical", padding=40, spacing=20)
+        self.temps = []  # 최근 1분 동안의 온도 기록
 
-        self.temp_label = Label(text="--.-°C", font_size="72sp", bold=True)
-        self.level_label = Label(text="확인 중...", font_size="32sp")
-        self.info_label = Label(text="", font_size="18sp")
-        self.advice_label = Label(text="", font_size="18sp", halign="center")
-        self.advice_label.bind(width=self.wrap_text)  # 긴 문장을 화면 너비에서 줄바꿈
-        self.cause_label = Label(text="", font_size="16sp", halign="center")
-        self.cause_label.bind(width=self.wrap_text)
-        self.readings = []  # 최근 3분 동안의 (시각, 온도) 기록
+        box = BoxLayout(orientation="vertical", padding=40)
+        self.temp_label = Label(font_size="72sp")
+        self.level_label = Label(font_size="36sp")
+        self.info_label = Label(font_size="18sp", halign="center", text_size=(Window.width - 80, None))
+        box.add_widget(self.temp_label)
+        box.add_widget(self.level_label)
+        box.add_widget(self.info_label)
 
-        self.watch_button = Button(text="백그라운드 감시 켜기", font_size="20sp", size_hint_y=0.25)
-        self.watch_button.bind(on_press=self.toggle_watch)
-        self.watching = False
-
-        for w in (self.temp_label, self.level_label, self.info_label, self.advice_label, self.cause_label):
-            root.add_widget(w)
-
-        # 컴퓨터에서 실행할 때는 배터리 온도를 못 읽으니 슬라이더로 온도를 흉내 냄
-        self.test_slider = None
+        # 컴퓨터에서는 배터리 온도를 못 읽으니 슬라이더로 온도를 흉내 냄
         if not is_android():
-            self.test_slider = Slider(min=20, max=55, value=30, step=0.5, size_hint_y=0.2)
-            root.add_widget(Label(text="[컴퓨터 테스트용] 온도 슬라이더", font_size="16sp", size_hint_y=0.1))
-            root.add_widget(self.test_slider)
+            self.slider = Slider(min=20, max=55, value=30)
+            box.add_widget(self.slider)
 
-        root.add_widget(self.watch_button)
+        Clock.schedule_interval(self.refresh, 10)  # 10초마다 refresh 실행
+        return box
 
-        # 배경색: 단계가 바뀔 때마다 색을 바꿈
-        with root.canvas.before:
-            self.bg_color = Color(*COLORS["정상"])
-            self.bg_rect = Rectangle(pos=root.pos, size=root.size)
-        root.bind(pos=self.update_bg, size=self.update_bg)
-
-        Clock.schedule_interval(self.refresh, 2)  # 앱이 켜져 있는 동안 2초마다 새로 고침
-        return root
-
-    def wrap_text(self, label, width):
-        label.text_size = (width, None)
-
-    def update_bg(self, widget, value):
-        self.bg_rect.pos = widget.pos
-        self.bg_rect.size = widget.size
-
-    # 3. 앱이 처음 켜질 때: 알림 권한 요청 (안드로이드 13 이상은 꼭 필요)
+    # 2. 앱이 켜지면: 바로 한 번 표시하고, 폰이면 백그라운드 감시 시작
     def on_start(self):
+        self.refresh(0)
         if is_android():
-            from android.permissions import request_permissions
-            request_permissions(["android.permission.POST_NOTIFICATIONS"])
+            start_watch()
 
-    # 4. 온도를 읽어서 화면에 표시
+    # 3. 온도를 읽어서 판정하고 화면에 표시
     def refresh(self, dt):
         battery = get_battery()
-        if battery is None:  # 컴퓨터 테스트
-            battery = {"temp": self.test_slider.value, "level": 100, "charging": False}
+        if battery is None:  # 컴퓨터일 때
+            battery = {"temp": self.slider.value, "level": 100, "charging": False}
 
-        level, advice = judge(battery["temp"], battery["charging"])
-        charge_text = "충전 중" if battery["charging"] else "충전 안 함"
+        temp = battery["temp"]
+        charging = battery["charging"]
+        level, advice = judge(temp, charging)
+        rise = one_minute_rise(self.temps, temp, 7)  # 10초마다 7개 = 1분
+        cause, solution = guess_cause(temp, charging, rise)
 
-        self.temp_label.text = f"{battery['temp']:.1f}°C"
-        self.level_label.text = f"[{level}]"
-        self.info_label.text = f"배터리 {battery['level']}% · {charge_text}"
-        self.advice_label.text = advice
-        self.bg_color.rgba = COLORS[level]
-
-        # 온도 기록을 쌓아서 상승 속도를 구하고, 발열 원인을 추정
-        add_reading(self.readings, time.time(), battery["temp"])
-        rise = rise_per_minute(self.readings)
-        cause, solution = guess_cause(battery["temp"], battery["charging"], rise)
-        rise_text = "계산 중" if rise is None else f"{rise:+.1f}°C/분"
-        self.cause_label.text = f"온도 변화: {rise_text}\n추정 원인: {cause}\n해결책: {solution}"
-
-    # 5. 버튼: 백그라운드 감시(service.py) 켜기/끄기
-    def toggle_watch(self, button):
-        if not is_android():
-            button.text = "백그라운드 감시는 폰에서만 돼요"
-            return
-
-        from jnius import autoclass
-        activity = autoclass("org.kivy.android.PythonActivity").mActivity
-        service = autoclass(SERVICE_CLASS)
-
-        if self.watching:
-            service.stop(activity)
-            button.text = "백그라운드 감시 켜기"
-        else:
-            service.start(activity, "")
-            button.text = "백그라운드 감시 끄기"
-        self.watching = not self.watching
+        self.temp_label.text = f"{temp:.1f}°C"
+        self.level_label.text = level
+        self.level_label.color = COLORS[level]
+        self.info_label.text = f"배터리 {battery['level']}%\n{advice}\n\n추정 원인: {cause}\n해결책: {solution}"
 
 
-if __name__ == "__main__":
-    HeatAlarmApp().run()
+HeatAlarmApp().run()
